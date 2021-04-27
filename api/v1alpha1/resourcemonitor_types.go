@@ -29,18 +29,19 @@ type ResourceMonitorSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Foo is an example field of ResourceMonitor. Edit resourcemonitor_types.go to remove/update
-	Selector     SelectorSpec     `json:"selector"`
-	ChangeFilter ChangeFilterSpec `json:"changeFilter"`
-	BackendSpec  `json:",inline"`
+	Selector       SelectorSpec      `json:"selector"`
+	ChangeBuilder  ChangeBuilderSpec `json:"changeBuilder"`
+	MsgBackendSpec `json:",inline"`
 }
 
 type SelectorSpec struct {
-	Namespace  string            `json:"namespace,omitempty"`
-	Label      map[string]string `json:"label,omitempty"`
-	Annotation map[string]string `json:"annotation,omitempty"`
+	GVK       metav1.GroupVersionKind `json:"gvk"`
+	Namespace string                  `json:"namespace,omitempty"`
+	Labels    map[string]string       `json:"labels,omitempty"`
+	//Annotations metav1.LabelSelector    `json:"annotations,omitempty"`
 }
 
-type ChangeFilterSpec struct {
+type ChangeBuilderSpec struct {
 	Type ChangeFilterType `json:"type"`
 }
 
@@ -50,7 +51,7 @@ const (
 	JSONDiff ChangeFilterType = "JSONDiff"
 )
 
-type BackendSpec struct {
+type MsgBackendSpec struct {
 	MQTTBackend *MQTTBackendSpec `json:"mqttBackend,omitempty"`
 }
 

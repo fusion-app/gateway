@@ -38,16 +38,14 @@ vet: ## Run go vet against code.
 
 ##@ Build
 
-build: generate fmt vet ## Build manager binary.
+build: fmt vet ## Build manager binary.
 	go build -o bin/manager main.go
 
-run: manifests generate fmt vet ## Run a controller from your host.
+run: fmt vet ## Run a controller from your host.
 	go run ./main.go
 
-docker-build: test ## Build docker image with the manager.
+docker-build: ## Build docker image with the manager.
 	docker build -t ${IMG} .
-
-docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
 
 

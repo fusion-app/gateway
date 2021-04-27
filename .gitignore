@@ -6,6 +6,8 @@
 *.so
 *.dylib
 bin
+deploy
+example
 testbin/*
 
 # Test binary, build with `go test -c`
