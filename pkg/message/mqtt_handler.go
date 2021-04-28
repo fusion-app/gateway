@@ -13,10 +13,6 @@ import (
 
 var mqttLogger = ctrl.Log.WithName("mqtt")
 
-//var messagePubHandler mqtt.MessageHandler = func(Client mqtt.Client, msg mqtt.Message) {
-//	mqttLogger.WithValues("topic", msg.Topic(), "payload", msg.Payload()).Info("Received message")
-//}
-
 type MQTTMsgHandler struct {
 	Client     mqtt.Client
 	topic      string

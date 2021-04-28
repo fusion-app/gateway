@@ -2,6 +2,7 @@ package message
 
 import (
 	"encoding/json"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	monitorv1alpha1 "github.com/fusion-app/gateway/api/v1alpha1"

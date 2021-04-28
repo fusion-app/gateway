@@ -3,7 +3,7 @@ package job
 import (
 	"context"
 	"encoding/json"
-
+	"github.com/fusion-app/gateway/pkg/prom"
 	"github.com/go-logr/logr"
 	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -12,6 +12,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"time"
 
 	monitorv1alpha1 "github.com/fusion-app/gateway/api/v1alpha1"
 	"github.com/fusion-app/gateway/pkg/message"
@@ -25,18 +26,25 @@ type MonitorJob struct {
 	monitorName       string
 	interestGVKSchema schema.GroupVersionKind
 
-	cancelFunc    context.CancelFunc
-	cancelContext context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
 
-	msgHandler message.MsgHandler
-	logger     logr.Logger
-	mgrCache   cache.Cache
-	mgrClient  client.Client
+	msgHandler   message.MsgHandler
+	metricWorker *prom.MetricWorker
+	resultCh     <-chan *prom.MetricResult
+	logger       logr.Logger
+	mgrCache     cache.Cache
+	mgrClient    client.Client
 }
 
 func NewMonitorJob(ref *monitorv1alpha1.ResourceMonitor, logger logr.Logger, mgrCache cache.Cache, mgrClient client.Client) *MonitorJob {
-	cancelContext, cancelFunc := context.WithCancel(context.TODO())
+	jobContext, jobCancel := context.WithCancel(context.TODO())
 	interestGVK := ref.Spec.Selector.GVK
+	if ref.Spec.MsgBuilder.MsgSource.PrometheusSource == nil {
+		return nil
+	}
+	resultCh := make(chan *prom.MetricResult)
+	worker := prom.NewMetricWorker(jobContext, resultCh, ref.Spec.MsgBuilder.MsgSource.PrometheusSource)
 	return &MonitorJob{
 		MonitorSpec: ref.Spec.DeepCopy(),
 		monitorGVK:  ref.GroupVersionKind(),
@@ -46,12 +54,14 @@ func NewMonitorJob(ref *monitorv1alpha1.ResourceMonitor, logger logr.Logger, mgr
 			Version: interestGVK.Version,
 			Kind:    interestGVK.Kind,
 		},
-		cancelContext: cancelContext,
-		cancelFunc:    cancelFunc,
-		msgHandler:    message.NewMsgHandlerOrExist(ref.Spec.MsgBackendSpec),
-		logger:        logger,
-		mgrCache:      mgrCache,
-		mgrClient:     mgrClient,
+		ctx:          jobContext,
+		cancel:       jobCancel,
+		msgHandler:   message.NewMsgHandlerOrExist(ref.Spec.MsgBackendSpec),
+		metricWorker: worker,
+		resultCh:     resultCh,
+		logger:       logger,
+		mgrCache:     mgrCache,
+		mgrClient:    mgrClient,
 	}
 }
 
@@ -63,7 +73,7 @@ func (j *MonitorJob) listRelatedResource() (*unstructured.UnstructuredList, erro
 	for k, v := range j.MonitorSpec.Selector.Labels {
 		listOpt[k] = v
 	}
-	err := j.mgrClient.List(j.cancelContext, objList, listOpt)
+	err := j.mgrClient.List(j.ctx, objList, listOpt)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +105,10 @@ func (j *MonitorJob) Start() {
 					Name:      u.GetName(),
 				},
 				Data: objRawData,
+			}
+			if u.GetKind() == "VirtualMachineInstance" {
+				j.metricWorker.AddQuery("kubevirt", u.GetName(), "mem_use", "kubevirt_vmi_memory_resident_bytes")
+				j.metricWorker.AddQuery("kubevirt", u.GetName(), "cpu_sec", "kubevirt_vmi_vcpu_seconds")
 			}
 			_ = j.msgHandler.Publish(msg)
 			j.updateResourceStatus()
@@ -142,14 +156,32 @@ func (j *MonitorJob) Start() {
 				},
 				Data: objRawData,
 			}
+			if u.GetKind() == "VirtualMachineInstance" {
+				j.metricWorker.DeleteQuery("kubevirt", u.GetName(), "kubevirt_vmi_memory_resident_bytes")
+				j.metricWorker.DeleteQuery("kubevirt", u.GetName(), "kubevirt_vmi_vcpu_seconds")
+			}
 			_ = j.msgHandler.Publish(msg)
 			j.updateResourceStatus()
 		},
 	})
+
+	go func() {
+		for {
+			select {
+			case <-j.ctx.Done():
+				return
+			case result := <-j.resultCh:
+				j.logger.Info("Metric done", "result", result)
+			}
+		}
+	}()
+	go j.metricWorker.Start(time.Second * 20)
+
 }
 
 func (j *MonitorJob) Cancel() {
-	j.cancelFunc()
+	j.metricWorker.Stop()
+	j.cancel()
 }
 
 func (j *MonitorJob) updateResourceStatus() {
@@ -165,7 +197,7 @@ func (j *MonitorJob) updateResourceStatus() {
 	patch := client.MergeFrom(monitor.DeepCopy())
 	monitor.Status.Selected = len(objList.Items)
 
-	if err := j.mgrClient.Status().Patch(j.cancelContext, monitor, patch); err != nil {
+	if err := j.mgrClient.Status().Patch(j.ctx, monitor, patch); err != nil {
 		j.logger.Error(err, "Update monitor status failed")
 		return
 	}

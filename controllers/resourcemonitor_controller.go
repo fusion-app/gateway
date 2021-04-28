@@ -18,18 +18,18 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"time"
 
+	monitorv1alpha1 "github.com/fusion-app/gateway/api/v1alpha1"
+	"github.com/fusion-app/gateway/pkg/job"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-
-	monitorv1alpha1 "github.com/fusion-app/gateway/api/v1alpha1"
-	"github.com/fusion-app/gateway/pkg/job"
 )
 
 const monitorFinalizer = "monitor.fusion-app.io/finalizer"
@@ -39,10 +39,11 @@ type ResourceMonitorReconciler struct {
 	client.Client
 	Log        logr.Logger
 	Scheme     *runtime.Scheme
-	jobManager *job.SyncJobManager
+	jobManager *job.MonitorJobManager
 }
 
 func (r *ResourceMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	r.Log.Info("Reconcile start", "name", req.NamespacedName)
 	monitor := &monitorv1alpha1.ResourceMonitor{}
 	err := r.Get(ctx, req.NamespacedName, monitor)
 	if err != nil {
@@ -59,6 +60,7 @@ func (r *ResourceMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	isMarkedToBeDeleted := monitor.GetDeletionTimestamp() != nil
 	if isMarkedToBeDeleted {
 		if controllerutil.ContainsFinalizer(monitor, monitorFinalizer) {
+			r.Log.Info(fmt.Sprintf("Clean MonitorJob for %s", req.NamespacedName))
 			r.jobManager.CleanJob(monitor)
 			controllerutil.RemoveFinalizer(monitor, monitorFinalizer)
 			err := r.Update(context.TODO(), monitor)

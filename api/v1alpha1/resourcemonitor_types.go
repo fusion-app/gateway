@@ -29,8 +29,8 @@ type ResourceMonitorSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Foo is an example field of ResourceMonitor. Edit resourcemonitor_types.go to remove/update
-	Selector       SelectorSpec      `json:"selector"`
-	ChangeBuilder  ChangeBuilderSpec `json:"changeBuilder"`
+	Selector       SelectorSpec `json:"selector"`
+	MsgBuilder     MsgBuilder   `json:"msgBuilder"`
 	MsgBackendSpec `json:",inline"`
 }
 
@@ -41,8 +41,26 @@ type SelectorSpec struct {
 	//Annotations metav1.LabelSelector    `json:"annotations,omitempty"`
 }
 
-type ChangeBuilderSpec struct {
-	Type ChangeFilterType `json:"type"`
+type MsgBuilder struct {
+	Type      ChangeFilterType `json:"type"`
+	Format    *MsgFormat       `json:"format"`
+	MsgSource `json:",inline"`
+}
+
+type MsgSource struct {
+	PrometheusSource *PrometheusDataSource `json:"prometheus_source,omitempty"`
+}
+
+type PrometheusDataSource struct {
+	Scheme string `json:"scheme"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+}
+
+type MsgFormat struct {
+	Field    string `json:"field"`
+	Type     string `json:"type,omitempty"`
+	JSONPath string `json:"jsonPath"`
 }
 
 type ChangeFilterType string

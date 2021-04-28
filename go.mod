@@ -8,6 +8,8 @@ require (
 	github.com/go-logr/zapr v0.3.0 // indirect
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.2
+	github.com/prometheus/client_golang v1.10.0
+	github.com/prometheus/common v0.18.0
 	github.com/wI2L/jsondiff v0.1.0
 	k8s.io/apimachinery v0.19.4
 	k8s.io/client-go v12.0.0+incompatible
