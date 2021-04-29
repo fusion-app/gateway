@@ -2,34 +2,32 @@ package job
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/fusion-app/gateway/pkg/prom"
+	"time"
+
 	"github.com/go-logr/logr"
-	"github.com/wI2L/jsondiff"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	toolscache "k8s.io/client-go/tools/cache"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"time"
 
 	monitorv1alpha1 "github.com/fusion-app/gateway/api/v1alpha1"
-	"github.com/fusion-app/gateway/pkg/message"
+	"github.com/fusion-app/gateway/pkg/msg"
+	"github.com/fusion-app/gateway/pkg/prom"
 	"github.com/fusion-app/gateway/pkg/utils"
 )
 
 type MonitorJob struct {
 	MonitorSpec *monitorv1alpha1.ResourceMonitorSpec
 
-	monitorGVK        schema.GroupVersionKind
-	monitorName       string
-	interestGVKSchema schema.GroupVersionKind
+	monitorGVK  schema.GroupVersionKind
+	monitorName string
+	interestGVK schema.GroupVersionKind
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	msgHandler   message.MsgHandler
+	msgStore     *msg.MessageStore
 	metricWorker *prom.MetricWorker
 	resultCh     <-chan *prom.MetricResult
 	logger       logr.Logger
@@ -49,14 +47,14 @@ func NewMonitorJob(ref *monitorv1alpha1.ResourceMonitor, logger logr.Logger, mgr
 		MonitorSpec: ref.Spec.DeepCopy(),
 		monitorGVK:  ref.GroupVersionKind(),
 		monitorName: ref.GetName(),
-		interestGVKSchema: schema.GroupVersionKind{
+		interestGVK: schema.GroupVersionKind{
 			Group:   interestGVK.Group,
 			Version: interestGVK.Version,
 			Kind:    interestGVK.Kind,
 		},
 		ctx:          jobContext,
 		cancel:       jobCancel,
-		msgHandler:   message.NewMsgHandlerOrExist(ref.Spec.MsgBackendSpec),
+		msgStore:     msg.NewMsgStore(ref),
 		metricWorker: worker,
 		resultCh:     resultCh,
 		logger:       logger,
@@ -67,8 +65,8 @@ func NewMonitorJob(ref *monitorv1alpha1.ResourceMonitor, logger logr.Logger, mgr
 
 func (j *MonitorJob) listRelatedResource() (*unstructured.UnstructuredList, error) {
 	objList := &unstructured.UnstructuredList{}
-	objList.SetAPIVersion(j.interestGVKSchema.GroupVersion().String())
-	objList.SetKind(j.interestGVKSchema.Kind + "List")
+	objList.SetAPIVersion(j.interestGVK.GroupVersion().String())
+	objList.SetKind(j.interestGVK.Kind + "List")
 	listOpt := client.MatchingLabels{}
 	for k, v := range j.MonitorSpec.Selector.Labels {
 		listOpt[k] = v
@@ -82,7 +80,7 @@ func (j *MonitorJob) listRelatedResource() (*unstructured.UnstructuredList, erro
 
 func (j *MonitorJob) Start() {
 	j.updateResourceStatus()
-	informer, err := j.mgrCache.GetInformerForKind(context.TODO(), j.interestGVKSchema)
+	informer, err := j.mgrCache.GetInformerForKind(context.TODO(), j.interestGVK)
 	if err != nil {
 		j.logger.Error(err, "Build informer failed")
 		return
@@ -93,24 +91,11 @@ func (j *MonitorJob) Start() {
 			if !j.isRelated(u) {
 				return
 			}
-
-			objRawData, err := json.Marshal(obj)
-			if err != nil {
-				return
-			}
-			msg := &message.Message{
-				Op: message.NewResource,
-				Meta: &message.ResourceMeta{
-					Namespace: u.GetNamespace(),
-					Name:      u.GetName(),
-				},
-				Data: objRawData,
-			}
 			if u.GetKind() == "VirtualMachineInstance" {
-				j.metricWorker.AddQuery("kubevirt", u.GetName(), "mem_use", "kubevirt_vmi_memory_resident_bytes")
-				j.metricWorker.AddQuery("kubevirt", u.GetName(), "cpu_sec", "kubevirt_vmi_vcpu_seconds")
+				j.metricWorker.AddQuery(u.GetNamespace(), u.GetName(), "mem_use", "kubevirt_vmi_memory_resident_bytes")
+				j.metricWorker.AddQuery(u.GetNamespace(), u.GetName(), "cpu_sec", "kubevirt_vmi_vcpu_seconds")
 			}
-			_ = j.msgHandler.Publish(msg)
+			j.msgStore.OnResourceAdd(obj, u)
 			j.updateResourceStatus()
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
@@ -119,24 +104,7 @@ func (j *MonitorJob) Start() {
 			if !j.isRelated(oldU) && !j.isRelated(newU) {
 				return
 			}
-
-			patch, err := jsondiff.Compare(oldObj, newObj)
-			if err != nil {
-				return
-			}
-			patchData, err := json.MarshalIndent(patch, "", "    ")
-			if err != nil {
-				return
-			}
-			msg := &message.Message{
-				Op: message.UpdateResource,
-				Meta: &message.ResourceMeta{
-					Namespace: newU.GetNamespace(),
-					Name:      newU.GetName(),
-				},
-				Data: patchData,
-			}
-			_ = j.msgHandler.Publish(msg)
+			j.msgStore.OnResourceUpdate(newObj, newU)
 		},
 		DeleteFunc: func(obj interface{}) {
 			u := utils.ToUnstructured(obj)
@@ -144,23 +112,11 @@ func (j *MonitorJob) Start() {
 				return
 			}
 
-			objRawData, err := json.Marshal(obj.(ctrl.ObjectMeta))
-			if err != nil {
-				return
-			}
-			msg := &message.Message{
-				Op: message.DelResource,
-				Meta: &message.ResourceMeta{
-					Namespace: u.GetNamespace(),
-					Name:      u.GetName(),
-				},
-				Data: objRawData,
-			}
 			if u.GetKind() == "VirtualMachineInstance" {
-				j.metricWorker.DeleteQuery("kubevirt", u.GetName(), "kubevirt_vmi_memory_resident_bytes")
-				j.metricWorker.DeleteQuery("kubevirt", u.GetName(), "kubevirt_vmi_vcpu_seconds")
+				j.metricWorker.DeleteQuery(u.GetNamespace(), u.GetName(), "kubevirt_vmi_memory_resident_bytes")
+				j.metricWorker.DeleteQuery(u.GetNamespace(), u.GetName(), "kubevirt_vmi_vcpu_seconds")
 			}
-			_ = j.msgHandler.Publish(msg)
+			j.msgStore.OnResourceDel(obj, u)
 			j.updateResourceStatus()
 		},
 	})
@@ -170,8 +126,9 @@ func (j *MonitorJob) Start() {
 			select {
 			case <-j.ctx.Done():
 				return
-			case result := <-j.resultCh:
-				j.logger.Info("Metric done", "result", result)
+			case metricResult := <-j.resultCh:
+				j.logger.Info("Metric done", "result", metricResult)
+				j.msgStore.OnMetricUpdate(metricResult)
 			}
 		}
 	}()

@@ -3,6 +3,7 @@ module github.com/fusion-app/gateway
 go 1.15
 
 require (
+	github.com/alecthomas/jsonschema v0.0.0-20210413112511-5c9c23bdc720
 	github.com/eclipse/paho.mqtt.golang v1.3.3
 	github.com/go-logr/logr v0.3.0
 	github.com/go-logr/zapr v0.3.0 // indirect

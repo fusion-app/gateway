@@ -24,13 +24,13 @@ type MetricQuery struct {
 }
 
 func newMetricQuery(namespace, name, metric string) string {
-	return fmt.Sprintf("%s{namespace=\"%s\",name=\"%s\"}", metric, namespace, name)
+	return fmt.Sprintf("%s{exported_namespace=\"%s\",name=\"%s\"}", metric, namespace, name)
 }
 
 type MetricResult struct {
-	ResName      string             `json:"res_name"`
-	ResNamespace string             `json:"res_namespace"`
-	Fields       map[string]float64 `json:"fields"`
+	ResName      string                 `json:"res_name"`
+	ResNamespace string                 `json:"res_namespace"`
+	Fields       map[string]interface{} `json:"fields"`
 }
 
 type MetricWorker struct {
@@ -168,7 +168,7 @@ func (h *MetricWorker) doMetric() {
 		if result, exists := resultCache[resultCacheKey]; exists {
 			result.Fields[queryObj.Field] = queryVal
 		} else {
-			fields := make(map[string]float64)
+			fields := make(map[string]interface{})
 			fields[queryObj.Field] = queryVal
 			resultCache[resultCacheKey] = &MetricResult{
 				ResName:      queryObj.ResName,

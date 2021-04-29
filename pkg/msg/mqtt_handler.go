@@ -1,11 +1,10 @@
-package message
+package msg
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/eclipse/paho.mqtt.golang"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	monitorv1alpha1 "github.com/fusion-app/gateway/api/v1alpha1"
@@ -56,17 +55,13 @@ func NewMQTTMsgHandler(spec *monitorv1alpha1.MQTTBackendSpec) *MQTTMsgHandler {
 	}
 }
 
-func (h *MQTTMsgHandler) Publish(msg *Message) error {
-	msgData, err := json.Marshal(msg)
-	if err != nil {
-		mqttLogger.Error(err, "Serialize message failed")
-		return err
-	}
-	token := h.Client.Publish(h.topic, 0, false, msgData)
+func (h *MQTTMsgHandler) Publish(msg []byte) error {
+	token := h.Client.Publish(h.topic, 0, false, msg)
 	if !token.WaitTimeout(h.pubTimeout) {
 		mqttLogger.Error(token.Error(), "Publish failed")
 		return token.Error()
 	}
-	mqttLogger.Info("Publish success", "op", msg.Op, "meta", msg.Meta, "data", string(msg.Data))
+	//mqttLogger.Info("Publish success", "msg", string(msg))
+	mqttLogger.Info("Publish success")
 	return nil
 }

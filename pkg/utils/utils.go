@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -27,4 +28,8 @@ func ToUnstructured(runtimeObj interface{}) *unstructured.Unstructured {
 		return nil
 	}
 	return &unstructured.Unstructured{Object: innerObj}
+}
+
+func JSONSchemaID(u *unstructured.Unstructured) string {
+	return fmt.Sprintf("%s/%s", u.GetAPIVersion(), u.GetKind())
 }

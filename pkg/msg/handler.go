@@ -1,4 +1,4 @@
-package message
+package msg
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 var msgLogger = ctrl.Log.WithName("message")
 
 type MsgHandler interface {
-	Publish(*Message) error
+	Publish([]byte) error
 }
 
 var handlerCache = make(map[string]MsgHandler)

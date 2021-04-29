@@ -1,4 +1,4 @@
-package message
+package msg
 
 import (
 	"testing"
@@ -12,14 +12,18 @@ func TestMQTTMsgHandler_Publish(t *testing.T) {
 		Port: 1883,
 		Topic: "udogateway",
 	})
-	err := handler.Publish(&Message{
+	msg := &Message{
 		Op: NewResource,
 		Meta: &ResourceMeta{
 			Name: "test",
 			Namespace: "default",
 		},
-	})
+	}
+	d, err := msg.MarshalJSON(nil)
 	if err != nil {
+		t.Fail()
+	}
+	if err := handler.Publish(d); err != nil {
 		t.Errorf("Pub failed")
 	}
 }
